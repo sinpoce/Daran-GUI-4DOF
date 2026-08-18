@@ -53,15 +53,103 @@ def mono_font(point_size: int = 10, bold: bool = False):
     return f
 
 
+def build_light_palette():
+    """Return an explicit light application palette.
+
+    QSS does not cover every native sub-control and viewport on every Qt
+    platform.  In particular, Windows dark mode can otherwise leak a dark
+    ``Base``/``AlternateBase`` into tables while our stylesheet supplies dark
+    text.  A complete application palette gives every widget a light fallback;
+    QSS below then adds the industrial styling.
+    """
+    from PySide6.QtGui import QColor, QPalette
+
+    palette = QPalette()
+    colors = {
+        QPalette.ColorRole.Window: BG_WINDOW,
+        QPalette.ColorRole.WindowText: FG_TEXT,
+        QPalette.ColorRole.Base: BG_INPUT,
+        QPalette.ColorRole.AlternateBase: '#f2f5f8',
+        QPalette.ColorRole.ToolTipBase: '#ffffff',
+        QPalette.ColorRole.ToolTipText: FG_TEXT,
+        QPalette.ColorRole.Text: FG_TEXT,
+        QPalette.ColorRole.Button: '#f2f4f8',
+        QPalette.ColorRole.ButtonText: FG_TEXT,
+        QPalette.ColorRole.BrightText: '#ffffff',
+        QPalette.ColorRole.Highlight: ACCENT,
+        QPalette.ColorRole.HighlightedText: '#ffffff',
+        QPalette.ColorRole.Link: BLUE,
+        QPalette.ColorRole.LinkVisited: ACCENT_DIM,
+        QPalette.ColorRole.Light: '#ffffff',
+        QPalette.ColorRole.Midlight: '#e5e9ef',
+        QPalette.ColorRole.Mid: BORDER,
+        QPalette.ColorRole.Dark: BORDER_LIGHT,
+        QPalette.ColorRole.Shadow: '#768293',
+    }
+    if hasattr(QPalette.ColorRole, 'PlaceholderText'):
+        colors[QPalette.ColorRole.PlaceholderText] = FG_FAINT
+    for role, value in colors.items():
+        palette.setColor(QPalette.ColorGroup.All, role, QColor(value))
+
+    disabled = QPalette.ColorGroup.Disabled
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text,
+                 QPalette.ColorRole.ButtonText):
+        palette.setColor(disabled, role, QColor(FG_DIM))
+    palette.setColor(disabled, QPalette.ColorRole.Base, QColor('#f0f2f5'))
+    palette.setColor(disabled, QPalette.ColorRole.AlternateBase,
+                     QColor('#eceff3'))
+    palette.setColor(disabled, QPalette.ColorRole.Button, QColor('#eceef2'))
+    palette.setColor(disabled, QPalette.ColorRole.Highlight,
+                     QColor('#c3d6de'))
+    palette.setColor(disabled, QPalette.ColorRole.HighlightedText,
+                     QColor('#ffffff'))
+    return palette
+
+
 _QSS = Template("""
 /* ================= 全局 ================= */
 QMainWindow, QDialog { background: $bg_window; }
 QWidget { color: $fg_text; font-size: 9pt; }
+QLabel { background: transparent; color: $fg_text; }
+QLabel:disabled { color: $fg_dim; }
 QToolTip {
     background: #ffffff; color: $fg_text;
     border: 1px solid $border_light; padding: 4px 8px;
 }
 QLabel#dimLabel { color: $fg_dim; }
+QLabel#warningLabel {
+    background: #fff8df; color: #765b00; font-weight: 600;
+    border: 1px solid #e5c968; border-radius: 4px; padding: 8px 10px;
+}
+QLabel#statusPanelLabel {
+    background: $bg_card; color: $fg_text;
+    border: 1px solid $border; border-radius: 4px; padding: 7px 9px;
+}
+QLabel#statusPanelLabel:disabled {
+    background: #f0f2f5; color: $fg_dim;
+}
+QLabel#imagePlaceholder {
+    background: $bg_card; color: $fg_dim;
+    border: 1px solid $border; border-radius: 5px;
+}
+
+/* 分组框必须显式着色；否则深色系统调色板会从原生样式渗入对话框。 */
+QGroupBox {
+    background: $bg_panel; color: $fg_text;
+    border: 1px solid $border; border-radius: 5px;
+    margin-top: 10px; padding: 10px 8px 8px 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin; subcontrol-position: top left;
+    left: 10px; padding: 0 5px;
+    background: $bg_panel; color: $fg_text; font-weight: 600;
+}
+QGroupBox:disabled, QGroupBox:disabled::title { color: $fg_dim; }
+QScrollArea#dialogScrollArea { background: $bg_window; border: none; }
+QScrollArea#dialogScrollArea QWidget#qt_scrollarea_viewport {
+    background: $bg_window;
+}
+QWidget#dialogContent { background: $bg_window; }
 
 /* ================= 工具栏 ================= */
 QToolBar {
@@ -77,7 +165,7 @@ QPushButton[modeActive="true"] {
 }
 QPushButton[modeActive="true"]:hover { background: #cfecdb; }
 QPushButton[modeActive="true"]:disabled {
-    background: #e8f0ea; color: $fg_faint; border-color: $border;
+    background: #e8f0ea; color: $fg_dim; border-color: $border;
 }
 
 /* 急停：永远醒目的红，禁用时保持红色但压暗 */
@@ -90,7 +178,7 @@ QPushButton#estopButton {
 QPushButton#estopButton:hover { background: #e35555; }
 QPushButton#estopButton:pressed { background: $red_dark; }
 QPushButton#estopButton:disabled {
-    background: #e9b8b8; color: #f8eaea; border: 2px solid #d09a9a;
+    background: #e6b4b4; color: #712b2b; border: 2px solid #c98585;
 }
 
 /* ================= Dock ================= */
@@ -120,7 +208,7 @@ QPushButton {
 }
 QPushButton:hover { background: #e6eaf0; }
 QPushButton:pressed { background: #d8dee6; }
-QPushButton:disabled { background: #eceef2; color: $fg_faint; border-color: $border; }
+QPushButton:disabled { background: #eceef2; color: $fg_dim; border-color: $border; }
 
 /* 主操作按钮（全部移动到目标 / 连接） */
 QPushButton#primaryButton {
@@ -130,7 +218,7 @@ QPushButton#primaryButton {
 QPushButton#primaryButton:hover { background: #1290bb; }
 QPushButton#primaryButton:pressed { background: $accent_dim; }
 QPushButton#primaryButton:disabled {
-    background: #c3d6de; color: #f2f7f9; border-color: $border;
+    background: #d5e0e5; color: #56616f; border-color: $border;
 }
 
 /* ================= 输入控件 ================= */
@@ -143,7 +231,7 @@ QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid $accent;
 }
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
-    color: $fg_faint; background: #f0f2f5;
+    color: $fg_dim; background: #f0f2f5;
 }
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
@@ -177,8 +265,59 @@ QCheckBox::indicator {
     width: 14px; height: 14px; border: 1px solid $border_light;
     border-radius: 2px; background: $bg_input;
 }
-QCheckBox::indicator:checked { background: $accent; border-color: $accent; }
-QCheckBox::indicator:disabled { border-color: $border; background: #f0f2f5; }
+QCheckBox::indicator:hover { border-color: $accent; }
+QCheckBox::indicator:checked {
+    image: url($asset_dir/check.svg);
+    background: $accent; border-color: $accent;
+}
+QCheckBox::indicator:unchecked:disabled {
+    border-color: $border; background: #e5e9ee;
+}
+QCheckBox::indicator:checked:disabled {
+    image: url($asset_dir/check.svg);
+    border-color: #607985; background: #708b96;
+}
+QCheckBox:disabled { color: $fg_dim; }
+
+/* ================= 表格 ================= */
+QTableView, QTableWidget {
+    background: $bg_input; color: $fg_text;
+    alternate-background-color: #f1f5f8;
+    border: 1px solid $border; border-radius: 3px;
+    gridline-color: $border;
+    selection-background-color: $accent;
+    selection-color: #ffffff;
+    outline: 0;
+}
+QTableView::item, QTableWidget::item {
+    color: $fg_text; padding: 4px;
+}
+QTableView::item:selected, QTableWidget::item:selected {
+    background: $accent; color: #ffffff;
+}
+QTableView:disabled, QTableWidget:disabled {
+    background: #f0f2f5; color: $fg_dim;
+    alternate-background-color: #eceff3;
+    selection-background-color: #c3d6de;
+    selection-color: #ffffff;
+}
+QTableView::item:disabled, QTableWidget::item:disabled {
+    color: $fg_dim;
+}
+QHeaderView { background: $bg_toolbar; color: $fg_text; }
+QHeaderView::section {
+    background: $bg_toolbar; color: $fg_text; font-weight: 600;
+    border: none; border-right: 1px solid $border;
+    border-bottom: 1px solid $border_light; padding: 5px 7px;
+}
+QHeaderView::section:disabled {
+    background: #e8ebef; color: $fg_dim; border-color: $border;
+}
+QTableCornerButton::section {
+    background: $bg_toolbar; border: none;
+    border-right: 1px solid $border;
+    border-bottom: 1px solid $border_light;
+}
 
 /* ================= 滑块 ================= */
 QSlider::groove:horizontal {
@@ -233,9 +372,11 @@ QLabel#tileUnit { color: $fg_dim; font-size: 8pt; }
 QMenuBar { background: $bg_toolbar; color: $fg_text; border-bottom: 1px solid $border; }
 QMenuBar::item { padding: 4px 10px; background: transparent; }
 QMenuBar::item:selected { background: #d3dae3; }
-QMenu { background: #ffffff; border: 1px solid $border_light; }
-QMenu::item { padding: 5px 24px; }
+QMenuBar::item:disabled { color: $fg_dim; background: transparent; }
+QMenu { background: #ffffff; color: $fg_text; border: 1px solid $border_light; }
+QMenu::item { color: $fg_text; padding: 5px 24px; }
 QMenu::item:selected { background: $accent; color: #ffffff; }
+QMenu::item:disabled { background: transparent; color: $fg_dim; }
 QMenu::separator { height: 1px; background: $border; margin: 4px 8px; }
 
 QStatusBar { background: $bg_toolbar; color: $fg_dim; border-top: 1px solid $border; }

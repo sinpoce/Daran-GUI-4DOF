@@ -51,6 +51,11 @@ class ArmBackend(QObject):
     log_message = Signal(str, str)          # (level: 'info'|'warn'|'error', text)
     motion_enabled_changed = Signal(bool)
     joints_mode_changed = Signal(int)       # 关节模式：1=待机(释放) 2=闭环(锁定)
+    # (busy, payload): busy=True 时 payload 为本次明确选择的关节 ID；
+    # busy=False 时 payload 为包含 requested/succeeded/failed/reason 的结果字典。
+    # 设零会写入驱动器 Flash，耗时可达每轴约 2 秒，UI 用此信号显示进度并
+    # 禁止重复提交，而不阻塞 GUI 线程。
+    zero_setting_changed = Signal(bool, object)
 
     name = 'base'
 
@@ -89,13 +94,56 @@ class ArmBackend(QObject):
         """
         raise NotImplementedError
 
+    def begin_trajectory(self) -> int:
+        """Start a cancellable streamed-trajectory session.
+
+        The returned token is passed back with every trajectory command so a
+        backend can discard stale points after Stop Playback.  Backends that
+        do not support streamed trajectories return ``0``.
+        """
+        self.log_message.emit(
+            'warn', tr('Current backend does not support streamed trajectories'))
+        return 0
+
+    def command_trajectory_start(
+            self, token: int, angles_deg: Dict[int, float],
+            speed_rpm: float, accel: float,
+            gripper_deg: Optional[float] = None) -> None:
+        """Move smoothly to the first sample of a streamed trajectory."""
+        self.log_message.emit(
+            'warn', tr('Current backend does not support streamed trajectories'))
+
+    def command_trajectory_point(
+            self, token: int, angles_deg: Dict[int, float],
+            bandwidth_hz: float,
+            gripper_deg: Optional[float] = None) -> None:
+        """Submit one dense trajectory point using the vendor tracking mode."""
+        self.log_message.emit(
+            'warn', tr('Current backend does not support streamed trajectories'))
+
+    def cancel_trajectory(self, token: int, hold_position: bool = True) -> None:
+        """Invalidate queued trajectory points and optionally hold the live pose."""
+        return
+
+    def is_trajectory_idle(self, token: int) -> bool:
+        """Return True after the latest submitted point has finished sending."""
+        return True
+
     def estop(self) -> None:
         """急停（广播）。任何状态下都可调用，优先于队列中的其他命令。"""
         raise NotImplementedError
 
-    def set_zero_here(self) -> None:
-        """将当前位置设为零点（会短暂卸载关节，需使能运动）。"""
+    def set_zero_here(self, joint_ids: Optional[List[int]] = None) -> None:
+        """把明确指定的机械臂关节当前位置设为持久零点。
+
+        ``joint_ids`` 必须由调用方显式给出。实现不得用 CAN ID 0 广播，
+        因为同一总线上可能还有夹爪或其他不应被设零的电机。
+        """
         raise NotImplementedError
+
+    def is_setting_zero(self) -> bool:
+        """设零配置写入是否正在排队或执行。"""
+        return False
 
     def set_joints_mode(self, mode: int) -> None:
         """切换全部关节模式（广播）：1=待机(卸载/可手推)，2=闭环(锁定保持)。
@@ -159,6 +207,7 @@ def make_offline_state(joint_ids: List[int], names: List[str], source: str) -> A
 register({
     'Current backend does not support the gripper': '当前后端不支持夹爪',
     'Current backend does not support lock/release joints': '当前后端不支持 锁定/释放 关节',
+    'Current backend does not support streamed trajectories': '当前后端不支持流式轨迹',
     'Joint %d target %.2f° exceeds soft limit [%.1f, %.1f]°': '关节%d 目标 %.2f° 超出软限位 [%.1f, %.1f]°',
     'Joint %d single step %.1f° exceeds limit %.1f°': '关节%d 单次步进 %.1f° 超过上限 %.1f°',
 })

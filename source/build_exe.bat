@@ -1,14 +1,22 @@
 @echo off
 REM ============================================================
 REM  DrEmpower Arm GUI - build standalone exe
-REM  Run from the arm_gui directory (double click, or in PyCharm terminal)
+REM  Run from the source directory (double click, or in a terminal)
 REM ============================================================
 setlocal
 cd /d "%~dp0"
 
+set "PYTHON_EXE=python"
+if exist ".venv\Scripts\python.exe" set "PYTHON_EXE=.venv\Scripts\python.exe"
+
 echo.
-echo [1/5] checking opencv-contrib (aruco must survive)
-python -c "import cv2,sys; ok=hasattr(cv2,'aruco'); print('  cv2',cv2.__version__,'aruco',ok); sys.exit(0 if ok else 1)"
+echo [1/6] installing pinned runtime and build dependencies
+"%PYTHON_EXE%" -m pip install -r requirements.txt -r requirements-build.txt --disable-pip-version-check
+if errorlevel 1 goto :fail
+
+echo.
+echo [2/6] checking opencv-contrib (aruco must survive)
+"%PYTHON_EXE%" -c "import cv2,sys; ok=hasattr(cv2,'aruco'); print('  cv2',cv2.__version__,'aruco',ok); sys.exit(0 if ok else 1)"
 if errorlevel 1 (
   echo.
   echo   ERROR: cv2.aruco missing - plain opencv-python is installed.
@@ -19,21 +27,22 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/5] installing PyInstaller if needed
-python -c "import PyInstaller" 2>nul || pip install pyinstaller
+echo [3/6] checking the pinned PyInstaller environment
+"%PYTHON_EXE%" -c "import PyInstaller; print('  PyInstaller', PyInstaller.__version__)"
+if errorlevel 1 goto :fail
 
 echo.
-echo [3/5] cleaning previous build
+echo [4/6] cleaning previous build
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
 echo.
-echo [4/5] building (this takes a few minutes)
-pyinstaller ArmGUI.spec --noconfirm
+echo [5/6] building (this takes a few minutes)
+"%PYTHON_EXE%" -m PyInstaller --clean --noconfirm ArmGUI.spec
 if errorlevel 1 goto :fail
 
 echo.
-echo [5/5] checking single-file output
+echo [6/6] checking single-file output
 if not exist dist\ArmGUI.exe goto :fail
 
 echo.

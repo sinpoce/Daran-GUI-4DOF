@@ -22,13 +22,52 @@
    本项目标定依赖 cv2.aruco，只有 opencv-contrib 才有。
 """
 import os
+import sys
 from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo, StringFileInfo, StringStruct, StringTable,
+    VarFileInfo, VarStruct, VSVersionInfo,
+)
 
 block_cipher = None
-ROOT = os.path.abspath(os.getcwd())
+ROOT = os.path.abspath(SPECPATH)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from arm_gui.version import APP_NAME, WINDOWS_STRING_FILE_INFO, WINDOWS_VERSION
+
+version_info = VSVersionInfo(
+    ffi=FixedFileInfo(
+        filevers=WINDOWS_VERSION,
+        prodvers=WINDOWS_VERSION,
+        mask=0x3F,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0),
+    ),
+    kids=[
+        StringFileInfo([
+            StringTable('040904B0', [
+                StringStruct(key, value)
+                for key, value in WINDOWS_STRING_FILE_INFO.items()
+            ]),
+        ]),
+        VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+    ],
+)
 
 # ---- 随包只读资源（打包进 _MEIPASS）----
 datas = []
+
+# 全局 QSS 使用的 SpinBox 箭头与 Checkbox 勾选图标。PyInstaller 的
+# collect_submodules() 只收 Python 模块，不会自动携带这些 SVG 数据文件。
+_ui_asset_dir = os.path.join('arm_gui', 'ui', 'assets')
+for _asset_name in ('arrow_up.svg', 'arrow_down.svg', 'check.svg'):
+    _asset = os.path.join(_ui_asset_dir, _asset_name)
+    if os.path.exists(os.path.join(ROOT, _asset)):
+        datas.append((_asset, _ui_asset_dir))
 
 # 三维靶模型：core/target3d.py 运行时要读
 _model = os.path.join('calibration', 'target', 'target_model.json')
@@ -89,7 +128,7 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='ArmGUI',
+    name=APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -100,5 +139,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=version_info,
     # icon='app.ico',       # 有图标的话取消注释
 )

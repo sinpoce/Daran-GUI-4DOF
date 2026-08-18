@@ -1,8 +1,10 @@
-# Daran-GUI-4DOF
+# Daran-GUI-4DOF v1.2
 
 DrEmpower 四轴机械臂（J1–J4）桌面控制与三维手眼标定 GUI。当前发布版使用本机 USB-CAN 直连机械臂，包含关节控制、状态监视、D435i RGB-D 相机、三维标定、手动点位记录和单文件 EXE 打包配置。
 
-本发布版不包含论文实验数据、实验输出、YOLO/自动分拣脚本、测试目录或 SSH 远程控制代码。
+本发布版不包含论文实验数据、实验输出、YOLO/自动分拣脚本、测试目录、
+`关节 Python 函数库-251109` 参考目录或 SSH 远程控制代码。运行时只使用
+`source/arm_gui/vendor/drempower/` 中的内置协议模块。
 
 ## 1. 项目结构
 
@@ -10,7 +12,7 @@ DrEmpower 四轴机械臂（J1–J4）桌面控制与三维手眼标定 GUI。�
 Daran-GUI-4DOF/
 ├─ source/                              # Python 源码与构建文件
 │  ├─ main.py                           # 程序入口
-│  ├─ config.json                       # 本地 CAN/界面默认配置模板
+│  ├─ config.json                       # 首次运行生成的本机配置（不提交）
 │  ├─ requirements.txt                  # GUI 运行依赖
 │  ├─ run_gui.bat                       # 源码模式启动脚本
 │  ├─ build_exe.bat                     # PyInstaller 单文件打包脚本
@@ -58,7 +60,7 @@ Daran-GUI-4DOF/
 │     ├─ multi_plane_target.stl         # 三维标定板模型
 │     └─ *_preview.png / README.md      # 预览图和资源说明
 │
-└─ exe/ArmGUI.exe                       # PyInstaller onefile 单文件程序
+└─ GitHub Release                       # ArmGUI-v1.2-windows-x64.exe
 ```
 
 ## 2. 软件架构
@@ -82,7 +84,7 @@ CanBackend ── DrEmpower vendor protocol ── USB-CAN ── J1/J2/J3/J4
 ## 3. 环境要求
 
 - Windows 10/11
-- Python 3.11
+- Python 3.11/3.12 64-bit（仅源码运行或自行构建时需要）
 - USB-CAN 串口适配器
 - Intel RealSense D435i（使用相机和手眼标定时）
 
@@ -106,7 +108,8 @@ python main.py
 run_gui.bat
 ```
 
-首次使用前，在 `config.json` 中确认 CAN 串口、波特率和语言设置。默认仅允许本机 CAN 直连，连接后不会自动发送运动命令。
+首次运行会使用英文界面和安全默认值，并在本机生成 `config.json`。在界面中确认
+CAN 串口和波特率后再连接；连接后不会自动发送运动命令。
 
 ## 5. 单文件 EXE 打包
 
@@ -123,6 +126,10 @@ dist/ArmGUI.exe
 ```
 
 `ArmGUI.spec` 使用 PyInstaller `onefile` 模式，Qt、OpenCV、SciPy、RealSense DLL 和只读标定资源都会封装进 EXE。首次启动时会临时解压依赖，因此启动速度比源码模式慢一些。
+
+目标电脑不需要安装 Python、Anaconda、PySide6 或 requirements 中的包；USB-CAN
+与 RealSense 仍需要对应的 Windows 硬件驱动。正式 EXE 作为 GitHub Release
+`v1.2` 的附件发布，不放入 Git 源码历史。
 
 运行过程中，用户配置和新生成的标定结果可能写入 EXE 所在目录；这些是运行数据，不属于源码。
 
@@ -146,4 +153,3 @@ dist/ArmGUI.exe
 - 锁定关节用于闭环保持；释放关节会关闭保持力矩，机械臂可能下垂，必须先托住机械臂。
 - 不要在未确认标定板、TCP 和夹爪姿态时执行抓取动作。
 - 键盘 `Esc` 和 GUI 的 E-STOP 始终优先于普通运动命令。
-

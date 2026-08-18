@@ -304,6 +304,11 @@ def set_angles(id_list=[1, 2, 3], angle_list=[0, 0, 0], speed=10, param=10, mode
                         t = 2 * cm.sqrt(delta_angle / (6 * abs(param)))  # 等腰三角形轨迹所需要的时间
                     else:
                         t = speed / abs(param) + delta_angle / (6 * speed)  # 经历完整梯形轨迹所需要的时间
+                    # 上游 251109 文档规定 mode=1 的运动时间不得为 0，
+                    # 但零位移（例如停止回放后原地保持）会在此算出 t=0。
+                    # 显式落实文档中的 0.01 s 下限，避免关节报 motor error
+                    # 并退出闭环。preset_angle 内仍保留编码层的二次保护。
+                    t = max(0.01, float(t))
                     for i in range(len(id_list)):
                         preset_angle(id_num=id_list[i], angle=angle_list[i], t=t, param=param, mode=mode)
                     order_num = 0x11
@@ -2518,7 +2523,11 @@ def preset_angle(id_num=1, angle=0, t=0, param=0, mode=0):
         send_command(id_num=id_num, cmd=0x0C, data=data, rtr=0)
     elif mode == 1:
         f_angle = angle
-        s16_time = int(abs(t) / factor) # 运行时间
+        # The upstream 251109 doc promises a 0.01s fallback, but its Python
+        # implementation encoded zero for a zero-distance multi-axis move.
+        # Firmware treats a zero trapezoid time as a motor error, so enforce
+        # the documented minimum here (also covers hold-at-current-position).
+        s16_time = max(1, int(abs(t) / factor)) # 运行时间，至少 0.01s
         s16_accel = int((abs(param)) / factor)
         data = format_data([f_angle, s16_time, s16_accel], 'f s16 s16', 'encode')
         send_command(id_num=id_num, cmd=0x0C, data=data, rtr=0) # 将角度、时间、加转速发给关节

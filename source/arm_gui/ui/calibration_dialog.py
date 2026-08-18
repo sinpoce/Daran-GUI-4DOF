@@ -189,7 +189,7 @@ class CalibrationDialog(QDialog):
 
         self.overlay = QLabel('Opening RGB-D/IMU camera...')
         self.overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.overlay.setStyleSheet('background: #14171b; color: #5c6470;')
+        self.overlay.setObjectName('imagePlaceholder')
         self.overlay.setMinimumSize(560, 350)
         self.overlay.setSizePolicy(QSizePolicy.Policy.Expanding,
                                    QSizePolicy.Policy.Expanding)

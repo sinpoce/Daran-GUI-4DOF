@@ -168,7 +168,7 @@ class CameraPanel(QWidget):
         # ---- 图像区：RealSense 页 / MJPEG 页 ----
         self.image_lbl = QLabel(tr('Not started — select a source and press Start'))
         self.image_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_lbl.setStyleSheet('background: #14171b; color: #5c6470;')
+        self.image_lbl.setObjectName('imagePlaceholder')
         self.image_lbl.setSizePolicy(QSizePolicy.Policy.Expanding,
                                      QSizePolicy.Policy.Expanding)
         self.image_lbl.setMinimumSize(320, 240)

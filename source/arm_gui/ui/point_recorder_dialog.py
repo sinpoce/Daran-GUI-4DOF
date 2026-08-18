@@ -191,43 +191,6 @@ class PointRecorderDialog(QDialog):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
-        # Keep calibration records readable even when Windows/Qt is using a
-        # dark system palette.  A widget-local stylesheet takes precedence
-        # over the inherited application palette for the viewport and headers.
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #ffffff;
-                alternate-background-color: #f2f7f9;
-                color: #17242c;
-                gridline-color: #cbd7dc;
-                border: 1px solid #b8c8cf;
-                selection-background-color: #d6edf6;
-                selection-color: #102a36;
-            }
-            QTableWidget::item {
-                color: #17242c;
-                padding: 4px;
-            }
-            QTableWidget::item:selected {
-                background-color: #d6edf6;
-                color: #102a36;
-            }
-            QHeaderView::section {
-                background-color: #e5eef2;
-                color: #17242c;
-                border: 0;
-                border-right: 1px solid #c1cfd5;
-                border-bottom: 1px solid #b8c8cf;
-                padding: 5px;
-                font-weight: 600;
-            }
-            QTableCornerButton::section {
-                background-color: #e5eef2;
-                border: 0;
-                border-right: 1px solid #c1cfd5;
-                border-bottom: 1px solid #b8c8cf;
-            }
-        """)
         self.table.horizontalHeader().setStretchLastSection(True)
 
         self.path_label = QLabel("")

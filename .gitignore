@@ -1,0 +1,34 @@
+# Python environments and caches
+source/.venv/
+source/venv/
+**/__pycache__/
+*.py[cod]
+
+# Build products (the EXE is published as a GitHub Release asset)
+source/build/
+source/dist/
+build/
+dist/
+
+# Local tests and vendor reference material are intentionally not published
+source/tests/
+source/关节 Python 函数库-251109/
+
+# Machine-specific configuration and generated user data
+source/config.json
+source/teach_recordings/
+source/install_deps.log
+*.log
+
+# Generated calibration / experiment output (keep source/calibration/target/)
+source/calibration/data/
+source/calibration/formal_results/
+source/calibration/results/
+source/calibration/handeye_result.yaml
+source/calibration/measured_target_geometry.json
+
+# Editor / OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
