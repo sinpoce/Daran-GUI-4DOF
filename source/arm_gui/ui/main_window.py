@@ -77,6 +77,10 @@ class MainWindow(QMainWindow):
     # 否则每帧补发一次会把工作线程的命令队列灌满、回放永远排不上。
     _TEACH_RETRY_PERIOD_S = 1.5
     _TEACH_START_TIMEOUT_S = 12.0
+    # Stopping a drag recording must regain holding torque.  A single normal
+    # lock can legitimately fail when one broadcast telemetry reply is missed,
+    # so keep a separate bounded retry alive until a *new* mode=2 ACK arrives.
+    _TEACH_RECORD_LOCK_TIMEOUT_S = 12.0
     # 参考 positions_done() 会无限阻塞；GUI 用遥测做可取消的到位判定。
     _TEACH_PREPOSITION_TOL_DEG = 1.0
     _TEACH_PREPOSITION_SPEED_TOL_RPM = 1.0
@@ -104,6 +108,13 @@ class MainWindow(QMainWindow):
         self._teach_playback_timer = QTimer(self)
         self._teach_playback_timer.setSingleShot(True)
         self._teach_playback_timer.timeout.connect(self._on_teach_playback_tick)
+        self._teach_record_lock_timer = QTimer(self)
+        self._teach_record_lock_timer.setSingleShot(True)
+        self._teach_record_lock_timer.timeout.connect(
+            self._retry_teach_record_lock)
+        self._teach_record_lock_pending = False
+        self._teach_record_lock_deadline = 0.0
+        self._teach_record_lock_attempts = 0
         self._teach_playback_frames: list[dict] = []
         self._teach_playback_index = 0
         self._teach_playback_speed = 8.0
@@ -446,6 +457,7 @@ class MainWindow(QMainWindow):
             joint_ids=self.cfg.joint_ids,
             default_speed=self.joint_panel.speed_rpm(),
             default_accel=self.joint_panel.accel(),
+            request_recording_lock=self._request_teach_record_lock,
             parent=self,
         )
         dlg.playback_requested.connect(self._start_teach_playback)
@@ -462,6 +474,116 @@ class MainWindow(QMainWindow):
 
     def _on_teach_playback_stop_clicked(self) -> None:
         self._stop_teach_playback(tr('Teach playback stopped by user'))
+
+    def _request_teach_record_lock(self) -> None:
+        """Lock after recording and require a fresh asynchronous mode=2 ACK.
+
+        A drag-record stop is a safety transition, not a fire-and-forget UI
+        action.  The backend deliberately rejects a hold when any configured
+        motor lacks a fresh pose; retrying here lets a transient missed CAN
+        reply recover without weakening that safety check.  This timer belongs
+        to MainWindow so it remains alive if the teach dialog is closed just
+        after Stop Recording.
+        """
+        backend = self.backend
+        if backend is None or not self._connected:
+            dlg = self._teach_dialog
+            if dlg is not None:
+                dlg.set_record_lock_pending(False)
+            self._teach_feedback(
+                'error', tr('Recording stopped, but joint lock could not be '
+                            'requested: not connected'))
+            return
+
+        self._teach_record_lock_pending = True
+        self._teach_record_lock_deadline = (
+            time.monotonic() + self._TEACH_RECORD_LOCK_TIMEOUT_S)
+        self._teach_record_lock_attempts = 0
+
+        # Do not accept the cached pre-release mode=2 as success.  Stop can be
+        # clicked while release_pending is still waiting for its mode=1 ACK;
+        # only a new backend mode=2 signal after the request below may finish
+        # this transition.
+        self._joints_mode = 0
+        self._apply_mode_style()
+        dlg = self._teach_dialog
+        if dlg is not None:
+            dlg.set_record_lock_pending(True)
+        self._teach_feedback(
+            'info', tr('Recording stopped; requesting joint lock and waiting '
+                       'for closed-loop verification'))
+        self._submit_teach_record_lock()
+        self._update_ui_state()
+
+    def _submit_teach_record_lock(self) -> None:
+        """Submit one throttled post-record lock attempt."""
+        if not self._teach_record_lock_pending:
+            return
+        now = time.monotonic()
+        if now >= self._teach_record_lock_deadline:
+            self._finish_teach_record_lock(False)
+            return
+        backend = self.backend
+        if backend is None or not self._connected:
+            self._finish_teach_record_lock(
+                False, tr('Recording stopped, but the connection was lost '
+                          'before joint lock was verified'))
+            return
+
+        if self._teach_record_lock_attempts:
+            self._teach_feedback(
+                'warn', tr('Post-record joint lock not confirmed; retrying '
+                           '(attempt %d)')
+                % (self._teach_record_lock_attempts + 1))
+        self._teach_record_lock_attempts += 1
+        backend.set_joints_mode(2)
+        # A same-thread fake backend used by tests can emit mode=2 inside the
+        # call above.  Do not resurrect the timer after that success callback.
+        if self._teach_record_lock_pending:
+            self._teach_record_lock_timer.start(
+                max(1, int(self._TEACH_RETRY_PERIOD_S * 1000.0)))
+
+    def _retry_teach_record_lock(self) -> None:
+        self._submit_teach_record_lock()
+
+    def _finish_teach_record_lock(
+            self, success: bool, failure_reason: str = '') -> None:
+        """Finish post-record locking and synchronise toolbar/dialog state."""
+        if not self._teach_record_lock_pending:
+            return
+        self._teach_record_lock_timer.stop()
+        self._teach_record_lock_pending = False
+        self._teach_record_lock_deadline = 0.0
+        attempts = self._teach_record_lock_attempts
+        self._teach_record_lock_attempts = 0
+        dlg = self._teach_dialog
+        if dlg is not None:
+            dlg.set_record_lock_pending(False)
+        if success:
+            self._teach_feedback(
+                'info', tr('Recording stopped; joints locked and verified '
+                           'after %d attempt(s)') % attempts)
+        else:
+            reason = failure_reason or tr(
+                'Recording stopped, but joints were not locked within %.0f s; '
+                'support the arm and use "Lock Joints" after checking the '
+                'driver log') % self._TEACH_RECORD_LOCK_TIMEOUT_S
+            self._teach_feedback('error', reason)
+        self._update_ui_state()
+
+    def _cancel_teach_record_lock(self, reason: str = '') -> None:
+        """Cancel a stale retry during disconnect, teardown, or E-stop."""
+        if not self._teach_record_lock_pending:
+            return
+        self._teach_record_lock_timer.stop()
+        self._teach_record_lock_pending = False
+        self._teach_record_lock_deadline = 0.0
+        self._teach_record_lock_attempts = 0
+        dlg = self._teach_dialog
+        if dlg is not None:
+            dlg.set_record_lock_pending(False)
+        if reason:
+            self._teach_feedback('warn', reason)
 
     def _teach_feedback(self, level: str, text: str) -> None:
         """Log to telemetry AND echo into the teach dialog.
@@ -492,7 +614,8 @@ class MainWindow(QMainWindow):
             or self._teach_trajectory_token is not None
         )
         dlg = self._teach_dialog
-        return playback_busy or bool(dlg is not None and dlg.is_recording)
+        return (playback_busy or self._teach_record_lock_pending
+                or bool(dlg is not None and dlg.is_busy))
 
     def _validate_teach_frames(self, frames: list[dict]) -> tuple[bool, str]:
         """Pre-check the recording against soft limits / configured joint IDs.
@@ -974,7 +1097,8 @@ class MainWindow(QMainWindow):
         if backend is None:
             return
         teach = self._teach_dialog
-        need_lock = self._joints_mode == 1
+        need_lock = (self._joints_mode == 1
+                     or self._teach_record_lock_pending)
         if teach is not None:
             need_lock = (teach.prepare_for_shutdown(final_close=final_close)
                          or need_lock)
@@ -984,6 +1108,9 @@ class MainWindow(QMainWindow):
         self._stop_teach_playback(hold_position=True)
         if self._connected and need_lock:
             backend.set_joints_mode(2)
+        # shutdown() owns its own final best-effort hold; no retry may survive
+        # and accidentally target a newly-created backend after a reconnect.
+        self._cancel_teach_record_lock()
 
     def _on_connect_requested(self, kind: str, params: dict) -> None:
         self._teardown_backend()
@@ -1039,6 +1166,12 @@ class MainWindow(QMainWindow):
 
     def _apply_disconnected(self, desc: str) -> None:
         """统一处理断开后的 UI 复位：使能回 False、运动按钮禁用、卡片转灰。"""
+        lock_was_pending = self._teach_record_lock_pending
+        self._cancel_teach_record_lock()
+        if lock_was_pending:
+            self._teach_feedback(
+                'error', tr('Recording stopped, but the connection was lost '
+                            'before joint lock was verified'))
         self._stop_teach_playback(tr('Teach playback stopped: disconnected'))
         self._connected = False
         self._last_state = None
@@ -1096,6 +1229,9 @@ class MainWindow(QMainWindow):
             return
         self._joints_mode = int(mode)
         self._apply_mode_style()
+        if (self._teach_record_lock_pending
+                and self._joints_mode == 2):
+            self._finish_teach_record_lock(True)
         if self._joints_mode == 2:
             self._try_start_teach_playback()
         self._update_ui_state()
@@ -1338,6 +1474,9 @@ class MainWindow(QMainWindow):
         if self.backend is None:
             self.telemetry.append_log('warn', tr('E-stop not sent: no backend'))
             return
+        self._cancel_teach_record_lock(tr(
+            'Post-record joint lock retry cancelled: E-stop safety hold is '
+            'taking over'))
         self._stop_teach_playback(
             tr('Teach playback stopped: E-stop'), hold_position=False)
         self.backend.estop()
@@ -1755,6 +1894,20 @@ register({
     'Teach playback stopped: motion not enabled': '示教回放已停止：运动未使能',
     'Teach playback stopped: E-stop': '示教回放已停止：已急停',
     'Teach playback stopped by user': '示教回放已由用户停止',
+    'Recording stopped, but joint lock could not be requested: not connected':
+        '录制已停止，但无法请求锁定关节：尚未连接',
+    'Recording stopped; requesting joint lock and waiting for closed-loop verification':
+        '录制已停止；已请求锁定关节，正在等待闭环核验',
+    'Post-record joint lock not confirmed; retrying (attempt %d)':
+        '录制结束后的关节锁定尚未确认；正在重试（第 %d 次）',
+    'Recording stopped; joints locked and verified after %d attempt(s)':
+        '录制已停止；关节已在 %d 次尝试后锁定并通过核验',
+    'Recording stopped, but joints were not locked within %.0f s; support the arm and use "Lock Joints" after checking the driver log':
+        '录制已停止，但关节在 %.0f 秒内未能锁定；请扶稳机械臂，检查驱动器日志后点击“锁定关节”',
+    'Recording stopped, but the connection was lost before joint lock was verified':
+        '录制已停止，但在关节锁定通过核验前连接已断开',
+    'Post-record joint lock retry cancelled: E-stop safety hold is taking over':
+        '录制结束后的关节锁定重试已取消：急停安全保持正在接管',
     'Teach playback is disabled (set ui.enable_teach_playback=true in config.json to re-enable)':
         '示教回放已停用（在 config.json 中把 ui.enable_teach_playback 改为 true 可重新启用）',
     'Teach playback rejected: sample %d has no joint data':

@@ -150,7 +150,13 @@ class AppConfig:
             cfg.can = CanConfig(**{**asdict(cfg.can), **data.get('can', {})})
             cfg.ssh = SshConfig(**{**asdict(cfg.ssh), **data.get('ssh', {})})
             cfg.safety = SafetyConfig(**{**asdict(cfg.safety), **data.get('safety', {})})
-            cfg.ui = UiConfig(**{**asdict(cfg.ui), **data.get('ui', {})})
+            ui_data = {**asdict(cfg.ui), **data.get('ui', {})}
+            # ``enable_teach_playback=false`` was written by development
+            # builds while the feature was intentionally hidden.  v1.2 ships
+            # the completed workflow, so migrate that stale local switch to
+            # the release default instead of letting an old config hide it.
+            ui_data['enable_teach_playback'] = True
+            cfg.ui = UiConfig(**ui_data)
             cfg.gripper = GripperConfig(**{**asdict(cfg.gripper),
                                            **data.get('gripper', {})})
             cfg.calibration_point = CalibrationPointConfig(

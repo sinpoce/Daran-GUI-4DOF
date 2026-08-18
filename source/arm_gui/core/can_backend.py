@@ -1337,6 +1337,12 @@ class CanBackend(ArmBackend):
                 else:
                     self._joints_mode_state = 0
                     self._closed_loop_verified = False
+                    # Publish the failed/unknown transition as well.  Leaving
+                    # the last mode (often 1=released) cached in the GUI made a
+                    # failed post-record lock look as if its asynchronous
+                    # request had simply disappeared and gave retry owners no
+                    # fresh state to display.
+                    self.joints_mode_changed.emit(0)
                     if self._motion_enabled:
                         self._motion_enabled = False
                         self.motion_enabled_changed.emit(False)

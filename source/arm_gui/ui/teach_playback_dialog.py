@@ -56,6 +56,7 @@ class TeachPlaybackDialog(QDialog):
         joint_ids: Sequence[int],
         default_speed: float,
         default_accel: float,
+        request_recording_lock: Optional[Callable[[], None]] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -67,10 +68,17 @@ class TeachPlaybackDialog(QDialog):
         self._get_joints_mode = get_joints_mode
         self._lock_joints = lock_joints
         self._release_joints = release_joints
+        # Stopping/closing a recording needs more than the manual one-shot
+        # lock button: MainWindow supplies a confirmed, retrying request which
+        # remains alive even if this dialog is closed.  Unit users and older
+        # embedders fall back to the original callback.
+        self._request_recording_lock = (
+            request_recording_lock or lock_joints)
         self._joint_ids = tuple(int(jid) for jid in joint_ids)
 
         self._recording = False
         self._release_pending = False
+        self._record_lock_pending = False
         self._record_started_at = 0.0
         self._frames: list[dict] = []
         self._playing = False
@@ -181,7 +189,9 @@ class TeachPlaybackDialog(QDialog):
         connected = bool(self._get_connected())
         mode = int(self._get_joints_mode()) if connected else 0
         mode_text = tr('Disconnected')
-        if connected:
+        if self._record_lock_pending:
+            mode_text = tr('Locking / waiting for confirmation')
+        elif connected:
             if mode == 2:
                 mode_text = tr('Locked')
             elif mode == 1:
@@ -208,30 +218,43 @@ class TeachPlaybackDialog(QDialog):
         # switching also owns the mode controls until it reaches a stable state.
         mode_controls_allowed = (
             connected and not self._playing and not self._recording
-            and not self._release_pending)
+            and not self._release_pending and not self._record_lock_pending)
         self.btn_lock.setEnabled(mode_controls_allowed)
         self.btn_release.setEnabled(mode_controls_allowed)
         self.btn_start.setEnabled(connected and not self._recording
                                   and not self._release_pending
+                                  and not self._record_lock_pending
                                   and not self._playing)
         self.btn_stop.setEnabled(
             connected and (self._recording or self._release_pending))
-        self.btn_clear.setEnabled(not self._playing)
+        self.btn_clear.setEnabled(not self._playing
+                                  and not self._record_lock_pending)
         file_controls_allowed = (
             not self._playing and not self._recording
-            and not self._release_pending)
+            and not self._release_pending and not self._record_lock_pending)
         self.btn_open_file.setEnabled(file_controls_allowed)
         self.btn_save_as.setEnabled(file_controls_allowed and bool(self._frames))
         # 有连接就允许点击：样本不足/正在录制等原因由 _request_playback 明确回显，
         # 否则按钮变灰、点了毫无反应，用户无从判断卡在哪一步
         self.btn_play.setEnabled(connected and not self._playing
                                  and not self._recording
-                                 and not self._release_pending)
+                                 and not self._release_pending
+                                 and not self._record_lock_pending)
         self.btn_stop_play.setEnabled(self._playing)
 
     @property
     def is_recording(self) -> bool:
         return self._recording or self._release_pending
+
+    @property
+    def is_busy(self) -> bool:
+        """Whether recording/playback controls must remain mutually exclusive."""
+        return self.is_recording or self._record_lock_pending
+
+    def set_record_lock_pending(self, pending: bool) -> None:
+        """Reflect MainWindow's confirmed/retrying post-record lock state."""
+        self._record_lock_pending = bool(pending)
+        self.update_control_state()
 
     def set_playback_status(self, text: str, level: str = 'info') -> None:
         """Echo the main window's playback feedback inside the dialog."""
@@ -260,7 +283,7 @@ class TeachPlaybackDialog(QDialog):
         best-effort atomic save; failures are reported but never clear memory
         or prevent the caller from requesting the safety lock.
         """
-        need_lock = (self.is_recording
+        need_lock = (self.is_recording or self._record_lock_pending
                      or (self._get_connected()
                          and int(self._get_joints_mode()) == 1))
         if self.is_recording and self._frames:
@@ -269,6 +292,7 @@ class TeachPlaybackDialog(QDialog):
             self._auto_save_recording()
         self._recording = False
         self._release_pending = False
+        self._record_lock_pending = False
         self._playing = False
         # Suppress the child closeEvent only for application shutdown.  A
         # backend disconnect/switch leaves this dialog reusable after reconnect.
@@ -313,7 +337,8 @@ class TeachPlaybackDialog(QDialog):
     def _start_recording(self) -> None:
         if not self._get_connected():
             return
-        if self._recording:
+        if (self._recording or self._release_pending
+                or self._record_lock_pending or self._playing):
             return
         ret = QMessageBox.question(
             self,
@@ -345,8 +370,11 @@ class TeachPlaybackDialog(QDialog):
             return
         self._recording = False
         self._release_pending = False
-        # Stop recording means lock joints back for safe playback.
-        self._lock_joints()
+        # Stop recording means lock joints back for safe playback.  Production
+        # supplies a confirmed/retrying callback; request it *before* touching
+        # the filesystem so a slow or failed save can never delay the safety
+        # action.
+        self._request_recording_lock()
         # Lock is intentionally requested first.  Persistence is best effort
         # and never clears the in-memory frames on failure.
         if self._frames:
@@ -355,6 +383,17 @@ class TeachPlaybackDialog(QDialog):
             self._set_file_status(
                 tr('Recording stopped without samples; no file was created'),
                 'warn')
+        if self._record_lock_pending:
+            self.set_playback_status(tr(
+                'Recording stopped; waiting for joints to lock and verify'))
+        elif (not self._get_connected()
+              or int(self._get_joints_mode()) != 2):
+            # Auto-save reports through the same status line.  Restore a
+            # safety-first result if a lock callback could not enter/maintain
+            # the confirmed pending state.
+            self.set_playback_status(tr(
+                'Recording saved, but joint lock is not verified; support the '
+                'arm and check the driver log'), 'error')
         self._refresh_stats()
         self.update_control_state()
 
@@ -368,7 +407,7 @@ class TeachPlaybackDialog(QDialog):
         self._recording_created_at = None
         self._set_file_status(tr('No recording file selected'))
         if was_active:
-            self._lock_joints()
+            self._request_recording_lock()
         self._refresh_stats()
         self.update_control_state()
 
@@ -623,9 +662,11 @@ class TeachPlaybackDialog(QDialog):
         self.update_control_state()
 
     def _request_playback(self) -> None:
-        if self.is_recording:
+        if self.is_recording or self._record_lock_pending:
             self.set_playback_status(
-                tr('Stop recording before playing back'), 'warn')
+                (tr('Wait for joint lock verification before playing back')
+                 if self._record_lock_pending
+                 else tr('Stop recording before playing back')), 'warn')
             return
         if len(self._frames) < 2:
             self.set_playback_status(tr('No recording yet'), 'warn')
@@ -663,13 +704,14 @@ class TeachPlaybackDialog(QDialog):
                          and int(self._get_joints_mode()) == 1))
         self._recording = False
         self._release_pending = False
+        self._record_lock_pending = False
         # Always cancel: playback may still be queued waiting for lock/enable.
         # MainWindow treats that pending phase as active and will request a hold
         # whenever a trajectory token already exists.
         self._playing = False
         self.playback_stop_requested.emit()
         if need_lock:
-            self._lock_joints()
+            self._request_recording_lock()
         if was_recording and self._frames:
             # Safety request first; persistence is best effort and cannot erase
             # or otherwise alter the in-memory trajectory on failure.
@@ -745,6 +787,8 @@ register({
     'Stop Playback': '停止回放',
     'Playback requested…': '已请求回放…',
     'Stop recording before playing back': '请先停止录制再回放',
+    'Wait for joint lock verification before playing back':
+        '请等待关节锁定核验完成后再回放',
     'Loops': '循环',
     'Speed': '速度',
     'Acceleration': '加速度',
@@ -753,9 +797,14 @@ register({
     'Locked': '已锁定',
     'Released': '已释放',
     'Switching / unknown': '切换中/未知',
+    'Locking / waiting for confirmation': '正在锁定/等待核验',
     'Waiting for joints to enter released mode…': '正在等待关节进入释放模式…',
     'Joints released; recording started': '关节已释放，示教录制已开始',
     'Recording cancelled: connection lost before release': '关节释放前连接已中断，录制已取消',
+    'Recording stopped; waiting for joints to lock and verify':
+        '录制已停止；正在等待关节锁定并完成核验',
+    'Recording saved, but joint lock is not verified; support the arm and check the driver log':
+        '录制已保存，但关节锁定尚未核验；请扶稳机械臂并检查驱动器日志',
     'Waiting for released mode...': '等待关节释放...',
     'Recording...': '录制中...',
     'Samples: %d | Duration: %.2f s': '样本数：%d | 时长：%.2f 秒',
