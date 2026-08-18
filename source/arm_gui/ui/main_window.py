@@ -278,8 +278,8 @@ class MainWindow(QMainWindow):
         act_point_recorder.triggered.connect(self._on_point_recorder)
         m_calib.addAction(act_point_recorder)
         self._act_point_recorder = act_point_recorder
-        # 示教回放暂时隔离：ui.enable_teach_playback=false 时不挂菜单入口，
-        # teach_playback_dialog 不会被 import，示教状态机也不会被触发
+        # v1.2 默认启用示教功能；配置为 false 时不挂菜单入口，且不
+        # import teach_playback_dialog，从而可临时隔离整套示教流程。
         self._act_teach = None
         if self.cfg.ui.enable_teach_playback:
             act_teach = QAction(tr('Teach Playback…'), self)

@@ -57,10 +57,9 @@ class SafetyConfig:
 @dataclass
 class UiConfig:
     language: str = 'en'          # 'en' | 'zh'（默认英文，菜单可切换）
-    # 示教回放（手动拖动录制 + 轨迹回放）暂时隔离：默认不挂载菜单入口，
-    # 整套示教代码不会被加载，也不会介入遥测/使能流程。
-    # 需要继续调试时把本项改成 true。
-    enable_teach_playback: bool = False
+    # v1.2 正式启用示教录制、文件持久化和轨迹回放；如现场需要临时
+    # 隐藏入口，可在本机 config.json 中把本项改成 false。
+    enable_teach_playback: bool = True
 
 
 @dataclass
