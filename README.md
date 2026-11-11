@@ -1,8 +1,6 @@
 # Daran-GUI-4DOF v1.2
 
-DrEmpower 四轴机械臂（J1–J4）桌面控制与三维手眼标定 GUI。当前发布版使用本机 USB-CAN 直连机械臂，包含关节控制、状态监视、D435i RGB-D 相机、三维标定、手动点位记录和单文件 EXE 打包配置。
 
-本发布版不包含论文实验数据、实验输出、YOLO/自动分拣脚本、测试目录、
 `关节 Python 函数库-251109` 参考目录或 SSH 远程控制代码。运行时只使用
 `source/arm_gui/vendor/drempower/` 中的内置协议模块。
 
